@@ -16605,11 +16605,17 @@ cp_parser_iteration_statement (cp_parser* parser, bool *if_p, bool ivdep,
 	statement = begin_while_stmt ();
 	/* Look for the `('.  */
 	matching_parens parens;
-	parens.require_open (parser);
+  bool has_paren = false;
+  if (cp_lexer_next_token_is (parser->lexer, CPP_OPEN_PAREN))
+  {
+    parens.require_open (parser);
+    has_paren = true;
+  }
 	/* Parse the condition.  */
 	condition = cp_parser_condition (parser, RID_WHILE);
 	finish_while_stmt_cond (condition, statement, ivdep, unroll, novector);
 	/* Look for the `)'.  */
+  if (has_paren)
 	parens.require_close (parser);
 	/* Parse the dependent statement.  */
 	parser->in_statement = IN_ITERATION_STMT;
@@ -16639,12 +16645,18 @@ cp_parser_iteration_statement (cp_parser* parser, bool *if_p, bool ivdep,
 	cp_parser_require_keyword (parser, RID_WHILE, RT_WHILE);
 	/* Look for the `('.  */
 	matching_parens parens;
-	parens.require_open (parser);
+  bool has_paren = false;
+  if (cp_lexer_next_token_is (parser->lexer, CPP_OPEN_PAREN))
+  {
+    parens.require_open (parser);
+    has_paren = true;
+  }
 	/* Parse the expression.  */
 	expression = cp_parser_expression (parser);
 	/* We're done with the do-statement.  */
 	finish_do_stmt (expression, statement, ivdep, unroll, novector);
 	/* Look for the `)'.  */
+  if (has_paren)
 	parens.require_close (parser);
 	/* Look for the `;'.  */
 	cp_parser_require (parser, CPP_SEMICOLON, RT_SEMICOLON);
