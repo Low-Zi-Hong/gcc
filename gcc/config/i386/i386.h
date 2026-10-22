@@ -1726,7 +1726,7 @@ typedef struct ix86_args {
   int stdarg;                   /* Set to 1 if function is stdarg.  */
   enum calling_abi call_abi;	/* Set to SYSV_ABI for sysv abi. Otherwise
  				   MS_ABI for ms abi.  */
-  bool preserve_none_abi;	/* Set to true if the preserve_none ABI is
+  unsigned char preserve_none_abi;	/* Set to true if the preserve_none ABI is
 				   used.  */
   tree decl;			/* Callee decl.  */
 } CUMULATIVE_ARGS;

@@ -32,6 +32,9 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 
 #if ! STACK_GROWS_DOWNWARD
 # define TOPS >
+#ifndef __builtin_stack_address
+#define __builtin_stack_address() __builtin_frame_address(0)
+#endif
 #else
 # define TOPS <
 #endif
