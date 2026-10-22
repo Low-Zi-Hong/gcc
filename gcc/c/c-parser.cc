@@ -8728,12 +8728,16 @@ c_parser_paren_selection_header (c_parser *parser)
 
   /// here I do some edit lol 
 	bool has_paren = false;
-	if (parens.consume_open (parser)) has_paren = true; // allow without "("
+	if (c_parser_next_token_is (parser, CPP_OPEN_PAREN)){
+      c_parser_consume_token (parser);
+      has_paren = true;
+	}
 
   //if (!parens.require_open (parser))
   //  return error_mark_node;
   tree cond = c_parser_selection_header (parser, /*switch_p=*/false).value;
-  if (has_paren) parens.skip_until_found_close (parser);
+  if (has_paren)
+   parens.skip_until_found_close (parser);
   return cond;
 }
 

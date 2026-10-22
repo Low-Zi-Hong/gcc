@@ -15422,12 +15422,19 @@ cp_parser_selection_statement (cp_parser* parser, bool *if_p,
 	  }
 
 	/* Look for the `('.  */
+  // doing some edit here
 	matching_parens parens;
-	if (!parens.require_open (parser))
-	  {
-	    cp_parser_skip_to_end_of_statement (parser);
-	    return error_mark_node;
-	  }
+  bool has_paren = false;
+  if (cp_lexer_next_token_is (parser->lexer, CPP_OPEN_PAREN))
+  {
+    parens.require_open (parser);
+    has_paren = true;
+  }
+	//if (!parens.require_open (parser))
+	//  {
+	//    cp_parser_skip_to_end_of_statement (parser);
+	//    return error_mark_node;
+	//  }
 
 	/* Begin the selection-statement.  */
 	if (keyword == RID_IF)
@@ -15457,9 +15464,12 @@ cp_parser_selection_statement (cp_parser* parser, bool *if_p,
 	/* Parse the condition.  */
 	condition = cp_parser_condition (parser, keyword);
 	/* Look for the `)'.  */
+  // here I do edit
+  if (has_paren) {
 	if (!parens.require_close (parser))
 	  cp_parser_skip_to_closing_parenthesis (parser, true, false,
 						 /*consume_paren=*/true);
+    }
 
 	if (keyword == RID_IF)
 	  {
