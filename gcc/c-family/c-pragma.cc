@@ -52,6 +52,8 @@ struct GTY(()) align_stack {
 
 static GTY(()) struct align_stack * alignment_stack;
 
+static void handle_pragma_llm (cpp_reader *pfile);
+
 static void handle_pragma_pack (cpp_reader *);
 
 /* If we have a "global" #pragma pack(<n>) in effect when the first
@@ -120,6 +122,68 @@ pop_alignment (tree id)
   maximum_field_alignment = entry ? entry->alignment : default_alignment;
 
   alignment_stack = entry;
+}
+
+/* #pragma llm */
+static void
+handle_pragma_llm (cpp_reader *pfile) 
+{
+  location_t loc;
+  tree x;
+  int align = -1;
+  enum cpp_ttype token;
+  bool has_paren = false;
+ 
+  token = pragma_lex (&x, &loc);
+
+  if (token == CPP_OPEN_PAREN)
+    {
+      has_paren = true;
+      token = pragma_lex (&x, &loc);
+    }
+
+    if (token != CPP_STRING)
+    {
+      GCC_BAD_AT (loc, "%<#pragma llm%> expects a string literal prompt");
+      return;
+    }
+  
+    const char *prompt_str = TREE_STRING_POINTER(x);
+    int prompt_len = TREE_STRING_LENGTH (x);
+
+    inform (loc, "LLM Prompt Captured: %qs (length: %d)", prompt_str, prompt_len);
+
+    if (has_paren) {
+      token = pragma_lex(&x, &loc);
+      if(token != CPP_CLOSE_PAREN)
+       {
+        GCC_BAD_AT (loc, "missing %<)%> after %<#pragma llm%>");
+        return;
+       }
+    }
+
+  if(pragma_lex (&x, &loc) != CPP_EOF)
+    warning_at(loc,OPT_Wpragmas, "junk at end of after %<#pragma llm%>");
+
+
+  // todo
+  // here call external service to send to api provider and get output
+
+  const char test_code[] = "\nint injected_magic_num = 4242;\n"
+                            "const char *injected_msg = \"injected by #pragma llm\";\n";
+  size_t code_len = sizeof (test_code) -1;
+
+  unsigned char *buf = XNEWVEC (unsigned char, code_len +1);
+  memcpy (buf, test_code, code_len);
+  buf[code_len]= '\0';
+
+  // pfile -> current profile, buf -> buffer waiting to be injected
+  // code_len -> code length, from_stage -> put 0 thats mean new raw cide 
+  cpp_buffer *new_buffer = cpp_push_buffer (pfile, buf, code_len, 0);
+
+  if(new_buffer)
+    new_buffer->default_synp = 0;
+
 }
 
 /* #pragma pack ()
@@ -1912,7 +1976,11 @@ init_pragma (void)
 
   c_register_pragma_with_expansion (0, "message", handle_pragma_message);
 
-#ifdef REGISTER_TARGET_PRAGMAS
+  // my own llm pragma
+  c_register_pragma (NULL, "llm", handle_pragma_llm);
+
+
+  #ifdef REGISTER_TARGET_PRAGMAS
   REGISTER_TARGET_PRAGMAS ();
 #endif
 
