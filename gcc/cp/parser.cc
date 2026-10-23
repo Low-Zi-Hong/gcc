@@ -15446,7 +15446,7 @@ cp_parser_selection_statement (cp_parser* parser, bool *if_p,
 	  statement = begin_switch_stmt ();
 
 	/* Parse the optional init-statement.  */
-	if (cp_parser_init_statement_p (parser))
+	if (has_paren && cp_parser_init_statement_p (parser))
 	  {
 	    tree decl;
 	    if (cxx_dialect < cxx17)
@@ -15461,16 +15461,20 @@ cp_parser_selection_statement (cp_parser* parser, bool *if_p,
 	    cp_parser_init_statement (parser, &decl);
 	  }
 
-	/* Parse the condition.  */
-	condition = cp_parser_condition (parser, keyword);
+
 	/* Look for the `)'.  */
   // here I do edit
   if (has_paren) {
+    /* Parse the condition.  */
+    condition = cp_parser_condition (parser, keyword);
+
     if (!parens.require_close (parser))
       cp_parser_skip_to_closing_parenthesis (parser, true, false,
               /*consume_paren=*/true);
-      }
+  }
   else {
+    condition = cp_parser_binary_expression (parser, false, false,
+                                               PREC_NOT_OPERATOR, NULL);
       if (cp_lexer_next_token_is_not (parser->lexer, CPP_OPEN_BRACE))
         {
           error_at (cp_lexer_peek_token (parser->lexer)->location,
