@@ -15466,9 +15466,23 @@ cp_parser_selection_statement (cp_parser* parser, bool *if_p,
 	/* Look for the `)'.  */
   // here I do edit
   if (has_paren) {
-	if (!parens.require_close (parser))
-	  cp_parser_skip_to_closing_parenthesis (parser, true, false,
-						 /*consume_paren=*/true);
+    if (!parens.require_close (parser))
+      cp_parser_skip_to_closing_parenthesis (parser, true, false,
+              /*consume_paren=*/true);
+      }
+  else {
+      if (cp_lexer_next_token_is_not (parser->lexer, CPP_OPEN_BRACE))
+        {
+          error_at (cp_lexer_peek_token (parser->lexer)->location,
+                    "parenless %<if%> condition must be followed by %<{%>");
+          cp_parser_skip_to_end_of_block_or_statement (parser);
+
+          finish_if_stmt_cond(condition,statement);
+          finish_then_clause(statement);
+          finish_if_stmt (statement);
+
+          return statement;
+        }
     }
 
 	if (keyword == RID_IF)
