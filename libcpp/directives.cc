@@ -169,7 +169,8 @@ static void cpp_pop_definition (cpp_reader *, def_pragma_macro *,
   D(import,	T_IMPORT,	EXTENSION, INCL | EXPAND)  /* ObjC */	\
   D(assert,	T_ASSERT,	EXTENSION, DEPRECATED)	   /* SVR4 */	\
   D(unassert,	T_UNASSERT,	EXTENSION, DEPRECATED)	   /* SVR4 */	\
-  D(sccs,	T_SCCS,		EXTENSION, IN_I)   	   /*  SVR4? */
+  D(sccs,	T_SCCS,		EXTENSION, IN_I)   	   /*  SVR4? */\
+  D(llm, T_LLM, EXTENSION, IN_I)
 
 /* #sccs is synonymous with #ident.  */
 #define do_sccs do_ident
@@ -3390,5 +3391,98 @@ char *
 _cpp_bracket_include(cpp_reader *pfile)
 {
   return glue_header_name (pfile);
+}
+
+#include <stdio.h>
+
+#if defined(_WIN32) || defined(__CYGWIN__)
+# define POPEN _popen
+# define PCLOSE _pclose
+#else
+# define POPEN popen
+#define PCLOSE pclose
+#endif
+
+// here for llm purpose
+static void
+do_llm (cpp_reader *pfile)
+{
+  const cpp_token *token = cpp_get_token (pfile);
+
+  if (token -> type != CPP_STRING) {
+    cpp_error (pfile, CPP_DL_ERROR,
+              "expected a string literal prompt after %<#llm%>");
+    skip_rest_of_line(pfile);
+    return;
+  }
+
+  check_eol (pfile, false);
+
+  const char *raw_text = (const char *) token->val.str.text;
+  size_t raw_len = token->val.str.len;
+
+  char prompt[512] = {0};
+  if( raw_len >= 2)
+  {
+    size_t copy_len = raw_len - 2;
+    if (copy_len >= sizeof (prompt))
+      copy_len = sizeof(prompt) -1;
+    memcpy (prompt, raw_text +1,copy_len);
+    prompt[copy_len] = '\0';
+  }
+  const char *current_filename = "unknown.cpp";
+  if (pfile->buffer && pfile->buffer->file)
+    {
+      current_filename = _cpp_get_file_name (pfile->buffer->file);
+    }
+  char cmd[1024];
+
+  snprintf(cmd, sizeof(cmd), "python \"C:\\Users\\lzh\\Desktop\\test.py\" \"%s\" \"%s\"", current_filename, prompt);
+
+  FILE *fp = POPEN (cmd, "r");
+  if (!fp) {
+    cpp_error (pfile, CPP_DL_ERROR, "failed to spawn external LLM process");
+    return;
+  }
+
+  size_t cap = 1024;
+  size_t total_len = 0;
+  char *output_buf = (char *) xmalloc (cap);
+
+  char chunk[256];
+  while (fgets (chunk, sizeof(chunk),fp) != NULL)
+  {
+    size_t chunk_len = strlen(chunk);
+    if(total_len + chunk_len + 2 >= cap)
+    {
+      cap = (cap + chunk_len) *2;
+      output_buf = (char *) xrealloc (output_buf, cap);
+    }
+    memcpy (output_buf + total_len, chunk, chunk_len);
+    total_len += chunk_len;
+  }
+
+  PCLOSE (fp);
+
+  if (total_len == 0)
+  {
+    free (output_buf);
+    cpp_error (pfile, CPP_DL_ERROR, "external LLM returned empty output");
+    return;
+  }
+
+  if (output_buf[total_len - 1] != '\n')
+  {
+    output_buf[total_len++] = '\n';
+  }
+  output_buf[total_len] = '\0';
+
+
+
+
+  cpp_push_buffer (pfile, (const uchar *) output_buf, total_len, /*from_stage3=*/0);
+
+
+  
 }
 
