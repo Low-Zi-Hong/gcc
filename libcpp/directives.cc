@@ -3395,13 +3395,94 @@ _cpp_bracket_include(cpp_reader *pfile)
 
 #include <stdio.h>
 
-#if defined(_WIN32) || defined(__CYGWIN__)
-# define POPEN _popen
-# define PCLOSE _pclose
+#if defined(_WIN32)
+extern "C" {
+  void * __stdcall LoadLibraryA (const char *);
+  void * __stdcall GetProcAddress (void *, const char *);
+  int    __stdcall FreeLibrary (void *);
+  unsigned long __stdcall GetLastError (void);
+  unsigned long __stdcall GetModuleFileNameA (void *, char *, unsigned long);
+}
+typedef void *HMODULE;
 #else
-# define POPEN popen
-#define PCLOSE pclose
+#include <dlfcn.h>
 #endif
+
+typedef int (*fn_bridge_init)(const char *, int);
+typedef int (*fn_bridge_generate)(const char *, char *, size_t);
+typedef void (*fn_bridge_free)(void);
+
+static fn_bridge_init         p_bridge_init = NULL;
+static fn_bridge_generate     p_bridge_generate = NULL;
+static fn_bridge_free         p_bridge_free = NULL;
+static int                    g_llm_initialized = 0;
+
+static int
+ensure_llm_runtime(cpp_reader *pfile)
+{
+  if(g_llm_initialized) return 1;
+
+#ifdef _WIN32
+  const char *dll_path = getenv ("GCC_LLM_DLL");
+  if (!dll_path)
+    dll_path = "gcc_llm_bridge.dll";
+  
+  HMODULE hDLL = LoadLibraryA (dll_path);
+  if(!hDLL)
+  {
+    cpp_error (pfile, CPP_DL_ERROR,"failed to load bridge library '%s' (Win32 Error: %lu)", dll_path, GetLastError ());
+    return 0;
+  }
+  
+  p_bridge_init = (fn_bridge_init) GetProcAddress (hDLL, "bridge_llm_init");
+  p_bridge_generate = (fn_bridge_generate) GetProcAddress (hDLL, "bridge_llm_generate");
+  p_bridge_free = (fn_bridge_free) GetProcAddress (hDLL, "bridge_llm_free");
+
+  if (!p_bridge_init || !p_bridge_generate || !p_bridge_free)
+  {
+    cpp_error (pfile, CPP_DL_ERROR,
+    "failed to resolve bridge symbols for '%s'", dll_path);
+    FreeLibrary (hDLL);
+    return 0;
+  }
+
+  char model_buf[1024];
+  const char *model_path = getenv ("GCC_LLM_MODEL");
+
+  if (!model_path)
+    {
+      unsigned long len = GetModuleFileNameA (NULL, model_buf, sizeof (model_buf));
+      if (len > 0 && len < sizeof (model_buf))
+        {
+          char *last_slash = strrchr (model_buf, '\\');
+          if (!last_slash)
+            last_slash = strrchr (model_buf, '/');
+
+          if (last_slash)
+            *(last_slash + 1) = '\0';
+          
+          strncat (model_buf, "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf", 
+                   sizeof (model_buf) - strlen (model_buf) - 1);
+          model_path = model_buf;
+        }
+        else {
+              cpp_error (pfile, CPP_DL_ERROR, "failed to find model");
+              return 0;
+        }
+    }
+
+  if (p_bridge_init (model_path, 4) != 0)
+  {
+    cpp_error (pfile, CPP_DL_ERROR, "failed to initializer llama model from '%s'",model_path);
+    return 0;
+  }
+#else
+  cpp_error (p_file, CPP_DL_ERROR, "LLM bridge only configured for Windows in this build");
+  return 0;
+#endif
+  g_llm_initialized = 1;
+  return 1;
+}
 
 // here for llm purpose
 static void
@@ -3430,59 +3511,69 @@ do_llm (cpp_reader *pfile)
     memcpy (prompt, raw_text +1,copy_len);
     prompt[copy_len] = '\0';
   }
-  const char *current_filename = "unknown.cpp";
-  if (pfile->buffer && pfile->buffer->file)
-    {
-      current_filename = _cpp_get_file_name (pfile->buffer->file);
-    }
-  char cmd[1024];
+  skip_rest_of_line (pfile);;
 
-  snprintf(cmd, sizeof(cmd), "python \"C:\\Users\\lzh\\Desktop\\test.py\" \"%s\" \"%s\"", current_filename, prompt);
+  const char *code_buf = (const char *) pfile->buffer->buf;
+  const char *line_start = (const char *) pfile->buffer->line_base;
+  const char *code_cur = (const char *) pfile->buffer->cur;
+  const char *code_end = (const char *) pfile->buffer->rlimit;
 
-  FILE *fp = POPEN (cmd, "r");
-  if (!fp) {
-    cpp_error (pfile, CPP_DL_ERROR, "failed to spawn external LLM process");
-    return;
+  const char *prefix_start = code_buf;
+  size_t full_prefix_len = (line_start > code_buf) ? (line_start - code_buf) : 0;
+  if (full_prefix_len > 1500) {
+    prefix_start = line_start - 1500;
   }
+  size_t prefix_len = line_start - prefix_start;
 
-  size_t cap = 1024;
-  size_t total_len = 0;
-  char *output_buf = (char *) xmalloc (cap);
+  size_t full_suffix_len = (code_end > code_cur) ? (code_end - code_cur) : 0;
+  size_t suffix_len = (full_suffix_len > 1000) ? 1000 : full_suffix_len;
 
-  char chunk[256];
-  while (fgets (chunk, sizeof(chunk),fp) != NULL)
-  {
-    size_t chunk_len = strlen(chunk);
-    if(total_len + chunk_len + 2 >= cap)
-    {
-      cap = (cap + chunk_len) *2;
-      output_buf = (char *) xrealloc (output_buf, cap);
-    }
-    memcpy (output_buf + total_len, chunk, chunk_len);
-    total_len += chunk_len;
-  }
+  size_t full_prompt_cap = prefix_len + suffix_len + sizeof(prompt) + 256;
+  char *full_prompt = (char *) xmalloc (full_prompt_cap);
 
-  PCLOSE (fp);
+  snprintf (full_prompt, full_prompt_cap,
+            "[Code Before]:\n"
+            "%.*s\n"
+            "[Code After]:\n"
+            "%.*s\n"
+            "[Task]:\n"
+            "%s",
+            (int) prefix_len, prefix_start,
+            (int) suffix_len, code_cur,
+            prompt);
 
-  if (total_len == 0)
+  if (!ensure_llm_runtime (pfile)) return;
+
+
+  size_t max_out = 65536;
+  char *output_buf = (char *)xmalloc (max_out);
+
+  int generated_len = p_bridge_generate (full_prompt, output_buf, max_out);
+  free(full_prompt);
+
+  if (generated_len <= 0)
   {
     free (output_buf);
-    cpp_error (pfile, CPP_DL_ERROR, "external LLM returned empty output");
+    cpp_error (pfile, CPP_DL_ERROR, "LLM bridge failed to generate code");
     return;
   }
 
-  if (output_buf[total_len - 1] != '\n')
+  fprintf (stderr, "\n\033[1;36m[GCC #llm Generated Code for \"%s\"]:\033[0m\n", prompt);
+  fprintf (stderr, "\033[1;33m----------------------------------------\033[0m\n");
+  fprintf (stderr, "%s", output_buf);
+  fprintf (stderr, "\033[1;33m----------------------------------------\033[0m\n\n");
+
+
+  if (output_buf[generated_len - 1] != '\n')
   {
-    output_buf[total_len++] = '\n';
+    output_buf[generated_len++] = '\n';
+    output_buf[generated_len] = '\0';
   }
-  output_buf[total_len] = '\0';
 
+  cpp_buffer *buffer = cpp_push_buffer (pfile, (const uchar *) output_buf, generated_len, /*from_stage3*/0);
 
-
-
-  cpp_push_buffer (pfile, (const uchar *) output_buf, total_len, /*from_stage3=*/0);
-
-
-  
+  if (buffer)
+    buffer->to_free = (uchar *) output_buf;
+  else
+    free (output_buf);
 }
-
